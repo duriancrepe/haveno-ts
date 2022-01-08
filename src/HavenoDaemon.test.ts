@@ -739,6 +739,173 @@ test("Can complete a trade", async () => {
   expect(bobFee).toBeGreaterThan(BigInt("0"));
 });
 
+test("Haveno account create and delete", async () => {
+
+  let daemon = alice;
+  // Delete account.
+  await daemon.deleteAccount();
+  let exists = await daemon.accountExists();
+  assert(!exists);
+
+  // Create account.
+  let password = "testPassword";
+  await daemon.createAccount(password);
+  exists = await daemon.accountExists();
+  assert(exists);
+
+  // 2nd create account should fail with exception.
+  try {
+    await daemon.createAccount("failPassword");
+    throw new Error("should have thrown error account already exists");
+  } catch (err) {
+    if (err.message !== "Cannot create account if the account already exists") throw new Error("Unexpected error: " + err.message);
+  }
+
+  // Delete account existing account.
+  await daemon.deleteAccount();
+  exists = await daemon.accountExists();
+  assert(!exists);
+
+  // Delete account is idempotant and should not throw if called twice.
+  await daemon.deleteAccount();
+
+  // Delete an opened account.
+  await daemon.createAccount(password);
+  await daemon.openAccount(password);
+  await daemon.deleteAccount();
+  assert(!exists);
+
+});
+
+test("Haveno account open and close", async () => {
+
+  let daemon = alice;
+
+  // Clean up
+  await daemon.deleteAccount();
+
+  // Shouldn't be opened without an account.
+  let opened = await daemon.isAccountOpen();
+  assert(!opened);
+
+  // Open account should throw since it doesn't exist.
+  try {
+    await daemon.openAccount("anyPassword");
+    throw new Error("should have thrown error account does not exists");
+  } catch (err) {
+    if (err.message !== "Cannot open account if account does not exist") throw new Error("Unexpected error: " + err.message);
+  }
+
+  // Close account should throw as well.
+  try {
+    await daemon.closeAccount();
+    throw new Error("should have thrown error unopened account");
+  } catch (err) {
+    if (err.message !== "Cannot close unopened account") throw new Error("Unexpected error: " + err.message);
+  }
+
+  // Create with a valid password.
+  let password = "testPassword";
+  await alice.createAccount(password);
+
+  // Open account should fail if incorrect password.
+  await daemon.openAccount("incorrectPassword");
+  opened = await daemon.isAccountOpen();
+  assert(!opened);
+
+  // Open account with correct password should succeed.
+  await daemon.openAccount(password);
+  opened = await daemon.isAccountOpen();
+  assert(opened);
+
+  // Again should have no effect.
+  await daemon.openAccount(password);
+  opened = await daemon.isAccountOpen();
+  assert(opened);
+
+  // Close the account
+  await daemon.closeAccount();
+  opened = await daemon.isAccountOpen();
+  assert(!opened);
+
+  // Close is supposed to be called on unopened accounts and will throw if called again.
+  try {
+    await daemon.closeAccount();
+    throw new Error("should have thrown error unopened account");
+  } catch (err) {
+    if (err.message !== "Cannot close unopened account") throw new Error("Unexpected error: " + err.message);
+  }
+
+  // Clean up
+  await daemon.deleteAccount();
+});
+
+test("Haveno account change password", async ()=> {
+  let daemon = alice;
+  await daemon.deleteAccount();
+  let password = "testPassword";
+  await daemon.createAccount(password);
+
+  // Change password should fail if not opened.
+  try {
+    await daemon.changePassword("failPassword");
+    throw new Error("should have thrown error unopened account");
+  } catch (err) {
+    if (err.message !== "Cannot change password on unopened account") throw new Error("Unexpected error: " + err.message);
+  }
+
+  // Change password and reopen
+  await daemon.openAccount(password);
+  let newPassword = "changedPassword";
+  await daemon.changePassword(newPassword);
+  await daemon.closeAccount();
+  await daemon.openAccount(password);
+  let opened = await daemon.isAccountOpen();
+  assert(!opened);
+  await daemon.openAccount(newPassword);
+  opened = await daemon.isAccountOpen(); 
+  assert(opened);
+
+  await daemon.deleteAccount();
+});
+
+test("Haveno account backup and restore", async () => {
+  let daemon = alice;
+  await daemon.deleteAccount();
+
+  try {
+    await daemon.backupAccount();
+    throw new Error("should have thrown error account does not exist");
+  } catch (err) {
+    if (err.message !== "Cannot backup non existing account") throw new Error("Unexpected error: " + err.message);
+  }
+  
+  let password = "testPassword";
+  await daemon.createAccount(password);
+
+  // Backup 
+  let zipBytes = await daemon.backupAccount();
+  assert(zipBytes.length > 0);
+
+  // Delete
+  await daemon.deleteAccount();
+  let exists = await daemon.accountExists();
+  assert(!exists);
+
+  // Restore
+  await daemon.restoreAccountNoStream(zipBytes);
+  exists = await daemon.accountExists();
+  assert(exists);
+
+  // Open
+  await daemon.openAccount(password);
+  let opened = daemon.isAccountOpen();
+  assert(opened);
+
+  // cleanup
+  await daemon.deleteAccount();
+});
+
 // ------------------------------- HELPERS ------------------------------------
 
 /**

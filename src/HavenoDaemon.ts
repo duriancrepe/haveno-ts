@@ -1,9 +1,9 @@
 import {HavenoUtils} from "./utils/HavenoUtils";
 import {TaskLooper} from "./utils/TaskLooper";
 import * as grpcWeb from 'grpc-web';
-import {DisputeAgentsClient, GetVersionClient, NotificationsClient, PriceClient, WalletsClient, OffersClient, PaymentAccountsClient, TradesClient} from './protobuf/GrpcServiceClientPb';
-import {CancelOfferRequest, ConfirmPaymentReceivedRequest, ConfirmPaymentStartedRequest, CreateCryptoCurrencyPaymentAccountReply, CreateCryptoCurrencyPaymentAccountRequest, CreateOfferReply, CreateOfferRequest, CreateXmrTxReply, CreateXmrTxRequest, GetBalancesReply, GetBalancesRequest, GetNewDepositSubaddressReply, GetNewDepositSubaddressRequest, GetOffersReply, GetOffersRequest, GetPaymentAccountsReply, GetPaymentAccountsRequest, GetTradeReply, GetTradeRequest, GetTradesReply, GetTradesRequest, GetVersionReply, GetVersionRequest, GetXmrTxsReply, GetXmrTxsRequest, MarketPriceInfo, MarketPriceReply, MarketPriceRequest, MarketPricesReply, MarketPricesRequest, NotificationMessage, OfferInfo, RegisterDisputeAgentRequest, RegisterNotificationListenerRequest, RelayXmrTxReply, RelayXmrTxRequest, SendNotificationRequest, TakeOfferReply, TakeOfferRequest, TradeInfo, XmrBalanceInfo, XmrDestination, XmrTx} from './protobuf/grpc_pb';
-import {AvailabilityResult, PaymentAccount} from './protobuf/pb_pb';
+import {GetVersionClient, DisputeAgentsClient, NotificationsClient, PriceClient, WalletsClient, OffersClient, PaymentAccountsClient, TradesClient, AccountClient} from './protobuf/GrpcServiceClientPb';
+import {GetVersionRequest, GetVersionReply, RegisterDisputeAgentRequest, MarketPriceRequest, MarketPriceReply, MarketPricesRequest, MarketPricesReply, MarketPriceInfo, GetBalancesRequest, GetBalancesReply, XmrBalanceInfo, GetOffersRequest, GetOffersReply, OfferInfo, GetPaymentAccountsRequest, GetPaymentAccountsReply, CreateCryptoCurrencyPaymentAccountRequest, CreateCryptoCurrencyPaymentAccountReply, CreateOfferRequest, CreateOfferReply, CancelOfferRequest, TakeOfferRequest, TakeOfferReply, TradeInfo, GetTradeRequest, GetTradeReply, GetTradesRequest, GetTradesReply, GetNewDepositSubaddressRequest, GetNewDepositSubaddressReply, ConfirmPaymentStartedRequest, ConfirmPaymentReceivedRequest, XmrTx, GetXmrTxsRequest, GetXmrTxsReply, XmrDestination, CreateXmrTxRequest, CreateXmrTxReply, RelayXmrTxRequest, RelayXmrTxReply, CreateAccountRequest, AccountExistsRequest, AccountExistsReply, DeleteAccountRequest, OpenAccountRequest, IsAccountOpenRequest, IsAccountOpenReply, CloseAccountRequest, ChangePasswordRequest, BackupAccountRequest, BackupAccountReply, RestoreAccountRequest} from './protobuf/grpc_pb';
+import {PaymentAccount, AvailabilityResult} from './protobuf/pb_pb';
 const console = require('console');
 
 /**
@@ -20,6 +20,7 @@ class HavenoDaemon {
   _paymentAccountsClient: PaymentAccountsClient;
   _offersClient: OffersClient;
   _tradesClient: TradesClient;
+  _accountClient: AccountClient;
   
   // other instance variables
   _url: string;
@@ -50,6 +51,7 @@ class HavenoDaemon {
     this._offersClient = new OffersClient(this._url);
     this._tradesClient = new TradesClient(this._url);
     this._notificationsClient = new NotificationsClient(this._url);
+    this._accountClient = new AccountClient(this._url);
   }
   
   /**
@@ -637,6 +639,164 @@ class HavenoDaemon {
       });
     });
   }
+
+  /**
+   * Indicates if the Haveno account is created.
+   * @returns - true if the account was created.
+   */
+  async accountExists(): Promise<boolean> {
+    let that = this;
+    let request = new AccountExistsRequest();
+    return new Promise(function(resolve, reject) {
+      that._accountClient.accountExists(request, {password: that._password}, function(err: grpcWeb.RpcError, response: AccountExistsReply) {
+        if (err) reject(err);
+        else resolve(response.getAccountExists());
+      });
+    });
+  }
+
+  /**
+   * Backup the account to a zip file.
+   */
+  async backupAccount(): Promise<Uint8Array[]> {
+    let that = this;
+    let request = new BackupAccountRequest();
+    return new Promise(function(resolve, reject) {
+      let response = that._accountClient.backupAccount(request, {password: that._password});
+      let zipBytes: Uint8Array[] = [];
+      response.on('data', function(chunk: BackupAccountReply) {
+        let bytes = chunk.getZipBytes();
+        zipBytes.push(bytes);
+      });
+
+      response.on('error', function(err) {
+        if(err) reject(err);
+      });
+
+      response.on('end', function() {
+        resolve(zipBytes);
+      });
+    });
+  }
+
+  /**
+   * Change the Haveno account password.
+   * @param password - the new password.
+   */
+  async changePassword(password: string): Promise<void> {
+    let that = this;
+    let request = new ChangePasswordRequest().setPassword(password);
+    return new Promise(function(resolve, reject) {
+      that._accountClient.changePassword(request, {password: that._password}, function(err: grpcWeb.RpcError) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  /**
+   * Close the currently open account.
+   */
+  async closeAccount(): Promise<void> {
+    let that = this;
+    let request = new CloseAccountRequest();
+    return new Promise(function(resolve, reject) {
+      that._accountClient.closeAccount(request, {password: that._password}, function(err: grpcWeb.RpcError) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  /**
+   * Create and open a new Haveno account.
+   * @param password - the password required to open the account.
+   */
+  async createAccount(password: string): Promise<void> {
+    let that = this;
+    let request = new CreateAccountRequest().setPassword(password);
+    return new Promise(function(resolve, reject) {
+      that._accountClient.createAccount(request, {password: that._password}, function(err: grpcWeb.RpcError) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  /**
+   * 	Permanently delete the Haveno account.
+   */
+  async deleteAccount(): Promise<void> {
+    let that = this;
+    let request = new DeleteAccountRequest();
+    return new Promise(function(resolve, reject) {
+      that._accountClient.deleteAccount(request, {password: that._password}, function(err: grpcWeb.RpcError) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  /**
+   * Indicates if the Haveno account is open and authenticated with the correct password.
+   * @returns - true if account is open.
+   */
+  async isAccountOpen(): Promise<boolean> {
+    let that = this;
+    let request = new IsAccountOpenRequest();
+    return new Promise(function(resolve, reject) {
+      that._accountClient.isAccountOpen(request, {password: that._password}, function(err: grpcWeb.RpcError, response: IsAccountOpenReply) {
+        if (err) reject(err);
+        else resolve(response.getIsAccountOpen());
+      });
+    });
+  }
+
+  /**
+   * Open existing account.
+   * @param password - the account password.
+   */
+  async openAccount(password: string): Promise<void> {
+    let that = this;
+    let request = new OpenAccountRequest().setPassword(password);
+    return new Promise(function(resolve, reject) {
+      that._accountClient.openAccount(request, {password: that._password}, function(err: grpcWeb.RpcError) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  /**
+   * Restore the account from a zip file.
+   * Temporarily using one big array of bytes since grpc-web does not create the typescript objects for client streaming.
+   */
+  async restoreAccountNoStream(zipBytesArray: Uint8Array[]): Promise<void> {
+
+    // Get the total length of all arrays.
+    let length = 0;
+    zipBytesArray.forEach(z => {
+      length += z.length;
+    });
+    
+    // Create a new array with total length and merge all source arrays.
+    let zipBytes = new Uint8Array(length);
+    let offset = 0;
+    zipBytesArray.forEach(z => {
+      zipBytes.set(z, offset);
+      offset += z.length;
+    });
+
+    let that = this;
+    let request = new RestoreAccountRequest().setZipBytes(zipBytes);
+    return new Promise(function(resolve, reject) {
+      that._accountClient.restoreAccountNoStream(request, {password: that._password}, function(err: grpcWeb.RpcError) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
 }
 
 export {HavenoDaemon};
