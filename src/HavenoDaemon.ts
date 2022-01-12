@@ -658,15 +658,18 @@ class HavenoDaemon {
   /**
    * Backup the account to a zip file.
    */
-  async backupAccount(): Promise<Uint8Array[]> {
+  async backupAccount(stream: any): Promise<number> {
+
     let that = this;
     let request = new BackupAccountRequest();
     return new Promise(function(resolve, reject) {
       let response = that._accountClient.backupAccount(request, {password: that._password});
-      let zipBytes: Uint8Array[] = [];
+      let total = 0;
       response.on('data', function(chunk: BackupAccountReply) {
         let bytes = chunk.getZipBytes();
-        zipBytes.push(bytes);
+        total += bytes.length;
+        console.log("Got a chunk of bytes, total:", total);
+        stream.write(bytes);
       });
 
       response.on('error', function(err) {
@@ -674,7 +677,7 @@ class HavenoDaemon {
       });
 
       response.on('end', function() {
-        resolve(zipBytes);
+        resolve(total);
       });
     });
   }
@@ -770,27 +773,17 @@ class HavenoDaemon {
   /**
    * Restore the account from a zip file.
    * Temporarily using one big array of bytes since grpc-web does not create the typescript objects for client streaming.
+   * Switch to chunked uploading if the account is too large.
    */
-  async restoreAccountNoStream(zipBytesArray: Uint8Array[]): Promise<void> {
-
-    // Get the total length of all arrays.
-    let length = 0;
-    zipBytesArray.forEach(z => {
-      length += z.length;
-    });
-    
-    // Create a new array with total length and merge all source arrays.
-    let zipBytes = new Uint8Array(length);
-    let offset = 0;
-    zipBytesArray.forEach(z => {
-      zipBytes.set(z, offset);
-      offset += z.length;
-    });
-
+  async restoreAccount(zipBytes: Uint8Array): Promise<void> {
     let that = this;
-    let request = new RestoreAccountRequest().setZipBytes(zipBytes);
+    let request = new RestoreAccountRequest()
+      .setZipBytes(zipBytes)
+      .setOffset(0)
+      .setTotalLength(zipBytes.length)
+      .setHasMore(false);
     return new Promise(function(resolve, reject) {
-      that._accountClient.restoreAccountNoStream(request, {password: that._password}, function(err: grpcWeb.RpcError) {
+      that._accountClient.restoreAccount(request, {password: that._password}, function(err: grpcWeb.RpcError) {
         if (err) reject(err);
         else resolve();
       });

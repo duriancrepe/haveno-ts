@@ -804,9 +804,24 @@ test("Haveno account open and close", async () => {
     if (err.message !== "Cannot close unopened account") throw new Error("Unexpected error: " + err.message);
   }
 
-  // Create with a valid password.
+  // Create with a valid password, should be opened as well.
   let password = "testPassword";
   await alice.createAccount(password);
+  opened = await daemon.isAccountOpen();
+  assert(opened);
+
+  // Close the account
+  await daemon.closeAccount();
+  opened = await daemon.isAccountOpen();
+  assert(!opened);
+
+  // Close is supposed to be called on opened accounts and will throw if called again.
+  try {
+    await daemon.closeAccount();
+    throw new Error("should have thrown error unopened account");
+  } catch (err) {
+    if (err.message !== "Cannot close unopened account") throw new Error("Unexpected error: " + err.message);
+  }
 
   // Open account should fail if incorrect password.
   await daemon.openAccount("incorrectPassword");
@@ -823,19 +838,6 @@ test("Haveno account open and close", async () => {
   opened = await daemon.isAccountOpen();
   assert(opened);
 
-  // Close the account
-  await daemon.closeAccount();
-  opened = await daemon.isAccountOpen();
-  assert(!opened);
-
-  // Close is supposed to be called on unopened accounts and will throw if called again.
-  try {
-    await daemon.closeAccount();
-    throw new Error("should have thrown error unopened account");
-  } catch (err) {
-    if (err.message !== "Cannot close unopened account") throw new Error("Unexpected error: " + err.message);
-  }
-
   // Clean up
   await daemon.deleteAccount();
 });
@@ -845,6 +847,7 @@ test("Haveno account change password", async ()=> {
   await daemon.deleteAccount();
   let password = "testPassword";
   await daemon.createAccount(password);
+  await daemon.closeAccount();
 
   // Change password should fail if not opened.
   try {
@@ -873,8 +876,20 @@ test("Haveno account backup and restore", async () => {
   let daemon = alice;
   await daemon.deleteAccount();
 
+  // Backup, first store into temp zip file. 
+  const fs = require('fs');
+  let rootDir = process.cwd()
+  let outDir = rootDir + '/temp/';
+  console.log("Backups are stored in directory", outDir)
+  if (!fs.existsSync(outDir)){
+    fs.mkdirSync(outDir);
+  }
+
+  let zipFile = outDir + 'backup.zip';
+  let stream = fs.createWriteStream(zipFile);
+
   try {
-    await daemon.backupAccount();
+    await daemon.backupAccount(stream);
     throw new Error("should have thrown error account does not exist");
   } catch (err) {
     if (err.message !== "Cannot backup non existing account") throw new Error("Unexpected error: " + err.message);
@@ -882,10 +897,10 @@ test("Haveno account backup and restore", async () => {
   
   let password = "testPassword";
   await daemon.createAccount(password);
-
-  // Backup 
-  let zipBytes = await daemon.backupAccount();
-  assert(zipBytes.length > 0);
+  
+  let zipSize = await daemon.backupAccount(stream);
+  assert(zipSize > 0);
+  stream.end();
 
   // Delete
   await daemon.deleteAccount();
@@ -893,13 +908,19 @@ test("Haveno account backup and restore", async () => {
   assert(!exists);
 
   // Restore
-  await daemon.restoreAccountNoStream(zipBytes);
+  let zipBytes: Uint8Array = new Uint8Array(fs.readFileSync(zipFile));
+  assert(zipBytes.length == zipSize);
+
+  await daemon.restoreAccount(zipBytes);
   exists = await daemon.accountExists();
   assert(exists);
 
+  let opened = await daemon.isAccountOpen();
+  assert(!opened);
+
   // Open
   await daemon.openAccount(password);
-  let opened = daemon.isAccountOpen();
+  opened = await daemon.isAccountOpen();
   assert(opened);
 
   // cleanup
