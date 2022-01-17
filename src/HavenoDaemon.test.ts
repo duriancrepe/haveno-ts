@@ -80,7 +80,7 @@ const TestConfig = {
       url: "http://localhost:8082",
       password: "apitest",
       passwordRequired: true,
-      enableProcessOutput: true 
+      enableProcessOutput: false // Turn on to see output in same console. Account delete may purge logs.
     },
     maxFee: BigInt("75000000000"),
     walletSyncPeriodMs: 5000,
@@ -165,7 +165,6 @@ beforeEach(async() => {
   let testName =  expect.getState().currentTestName;
   console.log("Before test \"" + testName + "\"");
   if (testName.indexOf("Haveno account") >= 0) {
-    console.log("Initiating account daemon");
     account = await initCleanAccountDaemon();
   }
 });
@@ -245,7 +244,7 @@ test("Can receive push notifications", async () => {
 test("Haveno account create", async () => {
   let daemon = account
 
-  // Create account.
+  // create account
   let password = "testPassword";
   await daemon.createAccount(password);
   let exists = await daemon.accountExists();
@@ -254,18 +253,18 @@ test("Haveno account create", async () => {
 
 test("Haveno account open", async () => {
   
-  // Create account.
+  // create account
   let password = "testPassword";
   await account.createAccount(password);
   let exists = await account.accountExists();
   assert(exists);
 
-  // Close the account
+  // close account
   await account.closeAccount();
   let opened = await account.isAccountOpen();
   assert(!opened);
 
-  // Open
+  // open
   await account.openAccount(password);
   opened = await account.isAccountOpen();
   assert(opened);
@@ -273,7 +272,7 @@ test("Haveno account open", async () => {
 
 test("Haveno account change password", async ()=> {
 
-  // Change password should fail if not opened.
+  // change password should fail if not opened
   try {
     await account.changePassword("failPassword");
     throw new Error("should have thrown error unopened account");
@@ -281,13 +280,12 @@ test("Haveno account change password", async ()=> {
     if (err.message !== "Cannot change password on unopened account") throw new Error("Unexpected error: " + err.message);
   }
 
-  // Create account.
   let password = "testPassword";
   await account.createAccount(password);
   let exists = await account.accountExists();
   assert(exists);
 
-  // Change password and reopen
+  // change password and reopen
   await account.openAccount(password);
   let newPassword = "changedPassword";
   await account.changePassword(newPassword);
@@ -302,14 +300,12 @@ test("Haveno account change password", async ()=> {
 
 test("Haveno account backup", async () => {
 
-  console.log("Creating account for backup");
-  // Create account.
   let password = "testPassword";
   await account.createAccount(password);
   let exists = await account.accountExists();
   assert(exists);
 
-  // Backup, first store into temp zip file. 
+  // backup, first store into temp zip file
   const fs = require('fs');
   let rootDir = process.cwd()
   let outDir = rootDir + '/../temp/';
@@ -334,9 +330,7 @@ test("Haveno account delete", async () => {
 
   account = await initHavenoDaemon(TestConfig.account);
 
-  // Create account
   let password = "testPassword";
-  console.log("Creating account");
   await account.createAccount(password);
   let exists = await account.accountExists();
   assert(exists);
@@ -911,7 +905,6 @@ async function initHavenoDaemon(config: any): Promise<HavenoDaemon> {
     await havenod.getVersion();
     return havenod;
   } catch (err) {
-    console.log("Existing instance missing, starting new", config.appName);
     return startHavenoProcess(config.appName, config.passwordRequired, config.logProcessOutput, config.enableProcessOutput);
   }
 }
@@ -1279,7 +1272,6 @@ function testOffer(offer: OfferInfo) {
 async function initCleanAccountDaemon() {
   // Init from existing instance if started up
   let daemon = await initHavenoDaemon(TestConfig.account);
-  //console.log("Checking account exists");
   let exists = await daemon.accountExists();
 
   // Delete and reinitialize process
