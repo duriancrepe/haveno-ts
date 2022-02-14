@@ -1,9 +1,9 @@
 import {HavenoUtils} from "./utils/HavenoUtils";
 import {TaskLooper} from "./utils/TaskLooper";
 import * as grpcWeb from 'grpc-web';
-import {GetVersionClient, AccountClient, MoneroConnectionsClient, DisputeAgentsClient, NotificationsClient, WalletsClient, PriceClient, OffersClient, PaymentAccountsClient, TradesClient, ShutdownServerClient} from './protobuf/GrpcServiceClientPb';
-import {GetVersionRequest, GetVersionReply, IsAppInitializedRequest, IsAppInitializedReply, RegisterDisputeAgentRequest, MarketPriceRequest, MarketPriceReply, MarketPricesRequest, MarketPricesReply, MarketPriceInfo, MarketDepthRequest, MarketDepthReply, MarketDepthInfo, GetBalancesRequest, GetBalancesReply, XmrBalanceInfo, GetOffersRequest, GetOffersReply, OfferInfo, GetPaymentAccountsRequest, GetPaymentAccountsReply, CreateCryptoCurrencyPaymentAccountRequest, CreateCryptoCurrencyPaymentAccountReply, CreateOfferRequest, CreateOfferReply, CancelOfferRequest, TakeOfferRequest, TakeOfferReply, TradeInfo, GetTradeRequest, GetTradeReply, GetTradesRequest, GetTradesReply, GetNewDepositSubaddressRequest, GetNewDepositSubaddressReply, ConfirmPaymentStartedRequest, ConfirmPaymentReceivedRequest, XmrTx, GetXmrTxsRequest, GetXmrTxsReply, XmrDestination, CreateXmrTxRequest, CreateXmrTxReply, RelayXmrTxRequest, RelayXmrTxReply, CreateAccountRequest, AccountExistsRequest, AccountExistsReply, DeleteAccountRequest, OpenAccountRequest, IsAccountOpenRequest, IsAccountOpenReply, CloseAccountRequest, ChangePasswordRequest, BackupAccountRequest, BackupAccountReply, RestoreAccountRequest, StopRequest, NotificationMessage, RegisterNotificationListenerRequest, SendNotificationRequest, UrlConnection, AddConnectionRequest, RemoveConnectionRequest, GetConnectionRequest, GetConnectionsRequest, SetConnectionRequest, CheckConnectionRequest, CheckConnectionsReply, CheckConnectionsRequest, StartCheckingConnectionsRequest, StopCheckingConnectionsRequest, GetBestAvailableConnectionRequest, SetAutoSwitchRequest, CheckConnectionReply, GetConnectionsReply, GetConnectionReply, GetBestAvailableConnectionReply} from './protobuf/grpc_pb';
-import {PaymentAccount, AvailabilityResult} from './protobuf/pb_pb';
+import {GetVersionClient, AccountClient, MoneroConnectionsClient, DisputeAgentsClient, NotificationsClient, WalletsClient, PriceClient, OffersClient, PaymentAccountsClient, TradesClient, ShutdownServerClient, DisputesClient} from './protobuf/GrpcServiceClientPb';
+import {GetVersionRequest, GetVersionReply, IsAppInitializedRequest, IsAppInitializedReply, RegisterDisputeAgentRequest, MarketPriceRequest, MarketPriceReply, MarketPricesRequest, MarketPricesReply, MarketPriceInfo, MarketDepthRequest, MarketDepthReply, MarketDepthInfo, GetBalancesRequest, GetBalancesReply, XmrBalanceInfo, GetOffersRequest, GetOffersReply, OfferInfo, GetPaymentAccountsRequest, GetPaymentAccountsReply, CreateCryptoCurrencyPaymentAccountRequest, CreateCryptoCurrencyPaymentAccountReply, CreateOfferRequest, CreateOfferReply, CancelOfferRequest, TakeOfferRequest, TakeOfferReply, TradeInfo, GetTradeRequest, GetTradeReply, GetTradesRequest, GetTradesReply, GetNewDepositSubaddressRequest, GetNewDepositSubaddressReply, ConfirmPaymentStartedRequest, ConfirmPaymentReceivedRequest, XmrTx, GetXmrTxsRequest, GetXmrTxsReply, XmrDestination, CreateXmrTxRequest, CreateXmrTxReply, RelayXmrTxRequest, RelayXmrTxReply, CreateAccountRequest, AccountExistsRequest, AccountExistsReply, DeleteAccountRequest, OpenAccountRequest, IsAccountOpenRequest, IsAccountOpenReply, CloseAccountRequest, ChangePasswordRequest, BackupAccountRequest, BackupAccountReply, RestoreAccountRequest, StopRequest, NotificationMessage, RegisterNotificationListenerRequest, SendNotificationRequest, UrlConnection, AddConnectionRequest, RemoveConnectionRequest, GetConnectionRequest, GetConnectionsRequest, SetConnectionRequest, CheckConnectionRequest, CheckConnectionsReply, CheckConnectionsRequest, StartCheckingConnectionsRequest, StopCheckingConnectionsRequest, GetBestAvailableConnectionRequest, SetAutoSwitchRequest, CheckConnectionReply, GetConnectionsReply, GetConnectionReply, GetBestAvailableConnectionReply, GetDisputeRequest, GetDisputeReply, GetDisputesRequest, GetDisputesReply, OpenDisputeRequest, ResolveDisputeRequest, SendDisputeChatMessageRequest} from './protobuf/grpc_pb';
+import {PaymentAccount, AvailabilityResult, Dispute, DisputeResult, Attachment} from './protobuf/pb_pb';
 const console = require('console');
 
 /**
@@ -15,6 +15,7 @@ class HavenoDaemon {
   _appName: string|undefined;
   _getVersionClient: GetVersionClient;
   _disputeAgentsClient: DisputeAgentsClient;
+  _disputesClient: DisputesClient;
   _notificationsClient: NotificationsClient;
   _moneroConnectionsClient: MoneroConnectionsClient;
   _walletsClient: WalletsClient;
@@ -56,6 +57,7 @@ class HavenoDaemon {
     this._accountClient = new AccountClient(this._url);
     this._moneroConnectionsClient = new MoneroConnectionsClient(this._url)
     this._disputeAgentsClient = new DisputeAgentsClient(this._url);
+    this._disputesClient = new DisputesClient(this._url);
     this._walletsClient = new WalletsClient(this._url);
     this._priceClient = new PriceClient(this._url);
     this._paymentAccountsClient = new PaymentAccountsClient(this._url);
@@ -989,6 +991,98 @@ class HavenoDaemon {
       });
     });
     if (this._process) return HavenoUtils.kill(this._process);
+  }
+
+  /**
+   * Get a dispute by trade id.
+   *
+   * @param {string} tradeId - the id of the trade
+   */
+  async getDispute(tradeId: string): Promise<Dispute> {
+    let that = this;
+    return new Promise(function(resolve, reject) {
+      that._disputesClient.getDispute(new GetDisputeRequest().setTradeId(tradeId), {password: that._password}, function(err: grpcWeb.RpcError, response: GetDisputeReply) {
+        if (err) reject(err);
+        else resolve(response.getDispute()!);
+      });
+    });
+  }
+
+  /**
+   * Get all disputes.
+   */
+  async getDisputes(): Promise<Dispute[]> {
+    let that = this;
+    return new Promise(function(resolve, reject) {
+      that._disputesClient.getDisputes(new GetDisputesRequest(), {password: that._password}, function(err: grpcWeb.RpcError, response: GetDisputesReply) {
+        if (err) reject(err);
+        else resolve(response.getDisputesList());
+      });
+    });
+  }
+
+  /**
+   * Opens a dispute for a trade.
+   *
+   * @param {string} tradeId - the id of the trade
+   */
+  async openDispute(tradeId: string): Promise<void> {
+    let that = this;
+    return new Promise(function(resolve, reject) {
+      that._disputesClient.openDispute(new OpenDisputeRequest().setTradeId(tradeId), {password: that._password}, function(err: grpcWeb.RpcError) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  /**
+   * Resolves a dispute.
+   *
+   * @param {string} tradeId - the id of the trade
+   * @param {DisputeResult.Winner} winner - the winner of the dispute
+   * @param {DisputeResult.Reason} reason - the reason for the dispute
+   * @param {string} summaryNotes - summary of the dispute
+   * @param {bigint} buyerPayoutAmount - amount buyer receives
+   * @param {bigint} sellerPayoutAmount - amount seller recieves
+   */
+  async resolveDispute(tradeId: string, winner: DisputeResult.Winner, reason: DisputeResult.Reason, summaryNotes: string,
+    buyerPayoutAmount: bigint, sellerPayoutAmount: bigint): Promise<void> {
+    let that = this;
+    return new Promise(function(resolve, reject) {
+      let request = new ResolveDisputeRequest();
+      request.setTradeId(tradeId);
+      request.setWinner(winner);
+      request.setReason(reason);
+      request.setSummaryNotes(summaryNotes);
+      request.setBuyerPayoutAmount(buyerPayoutAmount.toString());
+      request.setSellerPayoutAmount(sellerPayoutAmount.toString());
+      that._disputesClient.resolveDispute(request, {password: that._password}, function(err: grpcWeb.RpcError) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+  }
+
+  /**
+   * Sends a dispute chat message.
+   *
+   * @param {string} tradeId - the id of the trade
+   * @param {string} message - the message
+   * @param {Attachment[]} attachments - attachments
+   */
+  async sendDisputeChatMessage(tradeId: string, message: string, attachments: Attachment[]): Promise<void> {
+    let that = this;
+    return new Promise(function(resolve, reject) {
+      let request = new SendDisputeChatMessageRequest();
+      request.setTradeId(tradeId);
+      request.setMessage(message);
+      request.setAttachmentsList(attachments);
+      that._disputesClient.sendDisputeChatMessage(request, {password: that._password}, function(err: grpcWeb.RpcError) {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
   }
   
   // ------------------------------- HELPERS ----------------------------------

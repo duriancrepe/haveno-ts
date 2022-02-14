@@ -5,7 +5,7 @@ import {HavenoDaemon} from "./HavenoDaemon";
 import {HavenoUtils} from "./utils/HavenoUtils";
 import * as grpcWeb from 'grpc-web';
 import {MarketPriceInfo, NotificationMessage, OfferInfo, TradeInfo, UrlConnection, XmrBalanceInfo} from './protobuf/grpc_pb'; // TODO (woodser): better names; haveno_grpc_pb, haveno_pb
-import {PaymentAccount} from './protobuf/pb_pb';
+import {Attachment, DisputeResult, PaymentAccount} from './protobuf/pb_pb';
 import {XmrDestination, XmrTx, XmrIncomingTransfer, XmrOutgoingTransfer} from './protobuf/grpc_pb';
 import AuthenticationStatus = UrlConnection.AuthenticationStatus;
 import OnlineStatus = UrlConnection.OnlineStatus;
@@ -1000,7 +1000,7 @@ test("Can complete a trade", async () => {
   let offerBob = getOffer(await bob.getOffers(direction), offer.getId());
   if (!offerBob) throw new Error("Offer " + offer.getId() + " was not found in peer's offers after posting");
   expect(offerBob.getState()).toEqual("UNKNOWN"); // TODO: offer state is not known?
-  
+
   // cannot take offer with invalid payment id
   let aliceTradesBefore = await alice.getTrades();
   let bobTradesBefore = await bob.getTrades();
@@ -1095,6 +1095,144 @@ test("Can complete a trade", async () => {
   expect(aliceFee).toBeGreaterThan(BigInt("0"));
   expect(bobFee).toBeLessThanOrEqual(TestConfig.maxFee);
   expect(bobFee).toBeGreaterThan(BigInt("0"));
+});
+
+
+test("Can resolve disputes", async () => {
+
+  // wait for alice and bob to have unlocked balance for trade
+  let tradeAmount: bigint = BigInt("250000000000");
+  await waitForUnlockedBalance(tradeAmount * BigInt("2"), alice, bob);
+  let aliceBalancesBefore = await alice.getBalances();
+  let bobBalancesBefore: XmrBalanceInfo = await bob.getBalances();
+  console.log("Alice balance before: " + aliceBalancesBefore.getBalance());
+  console.log("Bob balance before: " + bobBalancesBefore.getBalance());
+  
+  // register to receive notifications
+  let aliceNotifications: NotificationMessage[] = [];
+  let bobNotifications: NotificationMessage[] = [];
+  await alice.addNotificationListener(notification => { aliceNotifications.push(notification); });
+  await bob.addNotificationListener(notification => { bobNotifications.push(notification); });
+
+  // alice posts offer to buy xmr
+  console.log("Alice posting offer");
+  let direction = "buy";
+  let offer: OfferInfo = await postOffer(alice, {direction: direction, amount: tradeAmount});
+  expect(offer.getState()).toEqual("AVAILABLE");
+  console.log("Alice done posting offer");
+  
+  // bob sees offer
+  await wait(TestConfig.walletSyncPeriodMs * 2);
+  let offerBob = getOffer(await bob.getOffers(direction), offer.getId());
+  if (!offerBob) throw new Error("Offer " + offer.getId() + " was not found in peer's offers after posting");
+  expect(offerBob.getState()).toEqual("UNKNOWN"); // TODO: offer state is not known?
+
+  // bob creates ethereum payment account
+  let testAccount =  TestConfig.cryptoAccounts[0];
+  let ethPaymentAccount: PaymentAccount = await bob.createCryptoPaymentAccount(
+      testAccount.currencyCode + " " +  testAccount.address.substr(0, 8) + "... " + GenUtils.getUUID(),
+      testAccount.currencyCode,
+      testAccount.address);
+  
+  // bob takes offer
+  let startTime = Date.now();
+  console.log("Bob taking offer");
+  let trade: TradeInfo = await bob.takeOffer(offer.getId(), ethPaymentAccount.getId()); // TODO (woodser): this returns before trade is fully initialized
+  expect(trade.getPhase()).toEqual("DEPOSIT_PUBLISHED");
+  console.log("Bob done taking offer in " + (Date.now() - startTime) + " ms");
+  
+  // alice is notified that offer is taken
+  let tradeNotifications = getNotifications(aliceNotifications, NotificationMessage.NotificationType.TRADE_UPDATE);
+  expect(tradeNotifications.length).toBe(1);
+  expect(tradeNotifications[0].getTrade()!.getPhase()).toEqual("DEPOSIT_PUBLISHED");
+  expect(tradeNotifications[0].getTitle()).toEqual("Offer Taken");
+  expect(tradeNotifications[0].getMessage()).toEqual("Your offer " + offer.getId() + " has been accepted");
+  
+  // bob can get trade
+  let fetchedTrade: TradeInfo = await bob.getTrade(trade.getTradeId());
+  expect(fetchedTrade.getPhase()).toEqual("DEPOSIT_PUBLISHED");
+  
+  // test bob's balances after taking trade
+  let bobBalancesAfter: XmrBalanceInfo = await bob.getBalances();
+  expect(BigInt(bobBalancesAfter.getUnlockedBalance())).toBeLessThan(BigInt(bobBalancesBefore.getUnlockedBalance()));
+  expect(BigInt(bobBalancesAfter.getReservedOfferBalance()) + BigInt(bobBalancesAfter.getReservedTradeBalance())).toBeGreaterThan(BigInt(bobBalancesBefore.getReservedOfferBalance()) + BigInt(bobBalancesBefore.getReservedTradeBalance()));
+  console.log("Bob balance after: " + bobBalancesAfter.getBalance());
+
+  // mine until deposit txs unlock
+  console.log("Mining to unlock deposit txs");
+  await waitForUnlockedTxs(fetchedTrade.getMakerDepositTxId(), fetchedTrade.getTakerDepositTxId());
+  console.log("Done mining to unlock deposit txs");
+  
+  // bob does not recieve payment, open a dispute
+  console.log("Bob opening dispute");
+  await bob.openDispute(trade.getTradeId());
+  let dispute = await bob.getDispute(trade.getTradeId());
+  expect(dispute.getTradeId()).toEqual(trade.getTradeId());
+  expect(dispute.getIsOpener()).toBe(true);
+  expect(dispute.getDisputeOpenerIsBuyer()).toBe(false);
+
+  // alice and arbitrator should see the dispute
+  await wait(TestConfig.maxTimePeerNoticeMs*2);
+  let disputes = await alice.getDisputes();
+  expect(disputes.length).toBeGreaterThanOrEqual(1); // could be existing disputes
+  expect(disputes[disputes.length-1].getTradeId()).toEqual(trade.getTradeId());
+  disputes = await arbitrator.getDisputes();
+  expect(disputes.length).toBeGreaterThanOrEqual(1);
+  expect(disputes[disputes.length-1].getTradeId()).toEqual(trade.getTradeId());
+
+  // send a message
+  console.log("Sending chat messages");
+  await arbitrator.sendDisputeChatMessage(trade.getTradeId(), "Arbitrator chat message", []);
+  await bob.sendDisputeChatMessage(trade.getTradeId(), "Bob chat message", []); // todo: test attachment
+  await alice.sendDisputeChatMessage(trade.getTradeId(), "Alice chat message", []); // todo: test attachment
+  await wait(TestConfig.maxTimePeerNoticeMs);
+
+  // arbitrator's dispute message gets updated with bob
+  let updatedDispute = await arbitrator.getDispute(trade.getTradeId());
+  let messages = updatedDispute.getChatMessageList();
+  expect(messages.length).toEqual(3);
+  expect(messages[1].getMessage()).toEqual("Arbitrator chat message");
+  expect(messages[2].getMessage()).toEqual("Bob chat message");
+
+  updatedDispute = await bob.getDispute(trade.getTradeId());
+  messages = updatedDispute.getChatMessageList();
+  expect(messages.length).toEqual(2);
+  expect(messages[1].getMessage()).toEqual("Bob chat message");
+
+  // todo: arbitrator needs to be able to send chat message to alice
+  updatedDispute = await alice.getDispute(trade.getTradeId());
+  messages = updatedDispute.getChatMessageList();
+  expect(messages.length).toEqual(2);
+  expect(messages[1].getMessage()).toEqual("Alice chat message");
+
+  // todo: notifications should contain the chat messages, pending chat notifications implementation
+
+  // arbitrator resolves dispute, giving payment to bob
+  console.log("Arbitrator resolving dispute");
+  bobBalancesBefore = await bob.getBalances();
+  aliceBalancesBefore = await alice.getBalances();
+  console.log("Alice balance before resolving: " + aliceBalancesBefore.getBalance());
+  console.log("Bob balance before resolving: " + bobBalancesBefore.getBalance());
+
+  let summaryNotes = "Buyer did not pay";
+  await arbitrator.resolveDispute(trade.getTradeId(), DisputeResult.Winner.SELLER, DisputeResult.Reason.SCAM, summaryNotes, BigInt(0), tradeAmount);
+
+  // Dispute is properly resolved
+  await wait(TestConfig.maxTimePeerNoticeMs);
+  updatedDispute = await alice.getDispute(trade.getTradeId());
+  expect(updatedDispute.getIsClosed()).toBe(true);
+  updatedDispute = await bob.getDispute(trade.getTradeId());
+  expect(updatedDispute.getIsClosed()).toBe(true);
+
+  // test balances after payout tx
+  await wait(TestConfig.walletSyncPeriodMs);
+  let aliceBalancesAfter = await alice.getBalances();
+  bobBalancesAfter = await bob.getBalances();
+  console.log("Alice balance after: " + aliceBalancesAfter.getBalance());
+  console.log("Bob balance after: " + bobBalancesAfter.getBalance());
+  expect(aliceBalancesAfter.getBalance()).toEqual(aliceBalancesBefore.getBalance());
+  expect(BigInt(bobBalancesAfter.getBalance())).toBeGreaterThan(BigInt(bobBalancesBefore.getBalance()));
+
 });
 
 // ------------------------------- HELPERS ------------------------------------
