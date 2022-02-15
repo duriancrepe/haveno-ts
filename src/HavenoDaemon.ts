@@ -1067,15 +1067,15 @@ class HavenoDaemon {
   /**
    * Sends a dispute chat message.
    *
-   * @param {string} tradeId - the id of the trade
+   * @param {string} disputeId - the id of the dispute
    * @param {string} message - the message
    * @param {Attachment[]} attachments - attachments
    */
-  async sendDisputeChatMessage(tradeId: string, message: string, attachments: Attachment[]): Promise<void> {
+  async sendDisputeChatMessage(disputeId: string, message: string, attachments: Attachment[]): Promise<void> {
     let that = this;
     return new Promise(function(resolve, reject) {
       let request = new SendDisputeChatMessageRequest();
-      request.setTradeId(tradeId);
+      request.setDisputeId(disputeId);
       request.setMessage(message);
       request.setAttachmentsList(attachments);
       that._disputesClient.sendDisputeChatMessage(request, {password: that._password}, function(err: grpcWeb.RpcError) {

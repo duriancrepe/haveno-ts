@@ -1166,46 +1166,57 @@ test("Can resolve disputes", async () => {
   // bob does not recieve payment, open a dispute
   console.log("Bob opening dispute");
   await bob.openDispute(trade.getTradeId());
-  let dispute = await bob.getDispute(trade.getTradeId());
-  expect(dispute.getTradeId()).toEqual(trade.getTradeId());
-  expect(dispute.getIsOpener()).toBe(true);
-  expect(dispute.getDisputeOpenerIsBuyer()).toBe(false);
+  let bobDispute = await bob.getDispute(trade.getTradeId());
+  expect(bobDispute.getTradeId()).toEqual(trade.getTradeId());
+  expect(bobDispute.getIsOpener()).toBe(true);
+  expect(bobDispute.getDisputeOpenerIsBuyer()).toBe(false);
 
-  // alice and arbitrator should see the dispute
-  await wait(TestConfig.maxTimePeerNoticeMs*2);
-  let disputes = await alice.getDisputes();
-  expect(disputes.length).toBeGreaterThanOrEqual(1); // could be existing disputes
-  expect(disputes[disputes.length-1].getTradeId()).toEqual(trade.getTradeId());
-  disputes = await arbitrator.getDisputes();
-  expect(disputes.length).toBeGreaterThanOrEqual(1);
-  expect(disputes[disputes.length-1].getTradeId()).toEqual(trade.getTradeId());
+  // get non-existing dispute should fail
+  try {
+    await bob.getDispute("invalid");
+    throw new Error("get dispute with invalid id should fail");
+  } catch (err) {
+    assert.equal(err.message, "dispute for trade id 'invalid' not found");
+  }
+
+  // alice should see the dispute
+  await wait(TestConfig.maxTimePeerNoticeMs*2); // wait 2x since the dispute propagates from bob->arbitrator->alice
+  let aliceDispute = await alice.getDispute(trade.getTradeId());
+  expect(aliceDispute.getTradeId()).toEqual(trade.getTradeId());
+  expect(aliceDispute.getIsOpener()).toBe(false);
+
+  // arbitrator should see both disputes
+  let disputes = await arbitrator.getDisputes();
+  expect(disputes.length).toBeGreaterThanOrEqual(2);
+  let arbAliceDispute = disputes.find(d => d.getId() === aliceDispute.getId());
+  assert(arbAliceDispute);
+  let arbBobDispute = disputes.find(d => d.getId() === bobDispute.getId());
+  assert(arbBobDispute);
 
   // send a message
-  console.log("Sending chat messages");
-  await arbitrator.sendDisputeChatMessage(trade.getTradeId(), "Arbitrator chat message", []);
-  await bob.sendDisputeChatMessage(trade.getTradeId(), "Bob chat message", []); // todo: test attachment
-  await alice.sendDisputeChatMessage(trade.getTradeId(), "Alice chat message", []); // todo: test attachment
+  console.log("Arbitrator sending chat messages");
+  await arbitrator.sendDisputeChatMessage(arbBobDispute!.getId(), "Arbitrator chat message to Bob", []);
+  await arbitrator.sendDisputeChatMessage(arbAliceDispute!.getId(), "Arbitrator chat message to Alice", []);
+
+  console.log("Alice and bob replying to chat messages");
+  await bob.sendDisputeChatMessage(bobDispute.getId(), "Bob chat message", []); // todo: test attachment
+  await alice.sendDisputeChatMessage(aliceDispute.getId(), "Alice chat message", []); // todo: test attachment
   await wait(TestConfig.maxTimePeerNoticeMs);
 
-  // arbitrator's dispute message gets updated with bob
-  let updatedDispute = await arbitrator.getDispute(trade.getTradeId());
+  // check messages on alice and bob
+  console.log("Confirming chat messages");
+  let updatedDispute = await bob.getDispute(trade.getTradeId());
   let messages = updatedDispute.getChatMessageList();
-  expect(messages.length).toEqual(3);
-  expect(messages[1].getMessage()).toEqual("Arbitrator chat message");
+  expect(messages.length).toEqual(3); // 1st message is the system message
+  expect(messages[1].getMessage()).toEqual("Arbitrator chat message to Bob");
   expect(messages[2].getMessage()).toEqual("Bob chat message");
-
-  updatedDispute = await bob.getDispute(trade.getTradeId());
-  messages = updatedDispute.getChatMessageList();
-  expect(messages.length).toEqual(2);
-  expect(messages[1].getMessage()).toEqual("Bob chat message");
-
-  // todo: arbitrator needs to be able to send chat message to alice
   updatedDispute = await alice.getDispute(trade.getTradeId());
   messages = updatedDispute.getChatMessageList();
-  expect(messages.length).toEqual(2);
-  expect(messages[1].getMessage()).toEqual("Alice chat message");
+  expect(messages.length).toEqual(3);
+  expect(messages[1].getMessage()).toEqual("Arbitrator chat message to Alice");
+  expect(messages[2].getMessage()).toEqual("Alice chat message");
 
-  // todo: notifications should contain the chat messages, pending chat notifications implementation
+  // todo: notifications should be verified to contain the chat messages, pending chat notifications implementation
 
   // arbitrator resolves dispute, giving payment to bob
   console.log("Arbitrator resolving dispute");
