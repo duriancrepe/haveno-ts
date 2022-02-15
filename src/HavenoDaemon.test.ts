@@ -1105,8 +1105,6 @@ test("Can resolve disputes", async () => {
   await waitForUnlockedBalance(tradeAmount * BigInt("2"), alice, bob);
   let aliceBalancesBefore = await alice.getBalances();
   let bobBalancesBefore: XmrBalanceInfo = await bob.getBalances();
-  console.log("Alice balance before: " + aliceBalancesBefore.getBalance());
-  console.log("Bob balance before: " + bobBalancesBefore.getBalance());
   
   // register to receive notifications
   let aliceNotifications: NotificationMessage[] = [];
@@ -1156,7 +1154,6 @@ test("Can resolve disputes", async () => {
   let bobBalancesAfter: XmrBalanceInfo = await bob.getBalances();
   expect(BigInt(bobBalancesAfter.getUnlockedBalance())).toBeLessThan(BigInt(bobBalancesBefore.getUnlockedBalance()));
   expect(BigInt(bobBalancesAfter.getReservedOfferBalance()) + BigInt(bobBalancesAfter.getReservedTradeBalance())).toBeGreaterThan(BigInt(bobBalancesBefore.getReservedOfferBalance()) + BigInt(bobBalancesBefore.getReservedTradeBalance()));
-  console.log("Bob balance after: " + bobBalancesAfter.getBalance());
 
   // mine until deposit txs unlock
   console.log("Mining to unlock deposit txs");
@@ -1222,8 +1219,6 @@ test("Can resolve disputes", async () => {
   console.log("Arbitrator resolving dispute");
   bobBalancesBefore = await bob.getBalances();
   aliceBalancesBefore = await alice.getBalances();
-  console.log("Alice balance before resolving: " + aliceBalancesBefore.getBalance());
-  console.log("Bob balance before resolving: " + bobBalancesBefore.getBalance());
 
   let summaryNotes = "Buyer did not pay";
   await arbitrator.resolveDispute(trade.getTradeId(), DisputeResult.Winner.SELLER, DisputeResult.Reason.SCAM, summaryNotes, BigInt(0), tradeAmount);
@@ -1239,8 +1234,6 @@ test("Can resolve disputes", async () => {
   await wait(TestConfig.walletSyncPeriodMs);
   let aliceBalancesAfter = await alice.getBalances();
   bobBalancesAfter = await bob.getBalances();
-  console.log("Alice balance after: " + aliceBalancesAfter.getBalance());
-  console.log("Bob balance after: " + bobBalancesAfter.getBalance());
   expect(aliceBalancesAfter.getBalance()).toEqual(aliceBalancesBefore.getBalance());
   expect(BigInt(bobBalancesAfter.getBalance())).toBeGreaterThan(BigInt(bobBalancesBefore.getBalance()));
 
