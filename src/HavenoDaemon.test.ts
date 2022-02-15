@@ -1097,7 +1097,6 @@ test("Can complete a trade", async () => {
   expect(bobFee).toBeGreaterThan(BigInt("0"));
 });
 
-
 test("Can resolve disputes", async () => {
 
   // wait for alice and bob to have unlocked balance for trade
@@ -1109,8 +1108,10 @@ test("Can resolve disputes", async () => {
   // register to receive notifications
   let aliceNotifications: NotificationMessage[] = [];
   let bobNotifications: NotificationMessage[] = [];
+  let arbitratorNotifications: NotificationMessage[] = [];
   await alice.addNotificationListener(notification => { aliceNotifications.push(notification); });
   await bob.addNotificationListener(notification => { bobNotifications.push(notification); });
+  await arbitrator.addNotificationListener(notification => { arbitratorNotifications.push(notification); });
 
   // alice posts offer to buy xmr
   console.log("Alice posting offer");
@@ -1196,8 +1197,17 @@ test("Can resolve disputes", async () => {
   await arbitrator.sendDisputeChatMessage(arbAliceDispute!.getId(), "Arbitrator chat message to Alice", []);
 
   console.log("Alice and bob replying to chat messages");
-  await bob.sendDisputeChatMessage(bobDispute.getId(), "Bob chat message", []); // todo: test attachment
-  await alice.sendDisputeChatMessage(aliceDispute.getId(), "Alice chat message", []); // todo: test attachment
+  
+  let attachment = new Attachment();
+  let bytes = new Uint8Array(Buffer.from("Proof Bob was scammed", "utf8"));
+  attachment.setBytes(bytes);
+  attachment.setFileName("proof.txt");
+  let attachment2 = new Attachment();
+  let bytes2 = new Uint8Array(Buffer.from("picture bytes", "utf8"));
+  attachment2.setBytes(bytes2);
+  attachment2.setFileName("proof.png");
+  await bob.sendDisputeChatMessage(bobDispute.getId(), "Bob chat message", [attachment, attachment2]); 
+  await alice.sendDisputeChatMessage(aliceDispute.getId(), "Alice chat message", []); 
   await wait(TestConfig.maxTimePeerNoticeMs);
 
   // check messages on alice and bob
@@ -1207,11 +1217,29 @@ test("Can resolve disputes", async () => {
   expect(messages.length).toEqual(3); // 1st message is the system message
   expect(messages[1].getMessage()).toEqual("Arbitrator chat message to Bob");
   expect(messages[2].getMessage()).toEqual("Bob chat message");
+  let attachments = messages[2].getAttachmentsList();
+  expect(attachments.length).toEqual(2);
+  expect(attachments[0].getFileName()).toEqual("proof.txt");
+  expect(attachments[0].getBytes()).toEqual(bytes);
+  expect(attachments[1].getFileName()).toEqual("proof.png");
+  expect(attachments[1].getBytes()).toEqual(bytes2);
   updatedDispute = await alice.getDispute(trade.getTradeId());
   messages = updatedDispute.getChatMessageList();
   expect(messages.length).toEqual(3);
   expect(messages[1].getMessage()).toEqual("Arbitrator chat message to Alice");
   expect(messages[2].getMessage()).toEqual("Alice chat message");
+
+  console.log("Confirming chat messages via notifications")
+  let chatNotifications = getNotifications(aliceNotifications, NotificationMessage.NotificationType.CHAT_MESSAGE);
+  expect(chatNotifications.length).toBe(1);
+  expect(chatNotifications[0].getChatMessage()?.getMessage()).toEqual("Arbitrator chat message to Alice");
+  chatNotifications = getNotifications(bobNotifications, NotificationMessage.NotificationType.CHAT_MESSAGE);
+  expect(chatNotifications.length).toBe(1);
+  expect(chatNotifications[0].getChatMessage()?.getMessage()).toEqual("Arbitrator chat message to Bob");
+  chatNotifications = getNotifications(arbitratorNotifications, NotificationMessage.NotificationType.CHAT_MESSAGE);
+  expect(chatNotifications.length).toBe(2);
+  expect(chatNotifications[0].getChatMessage()?.getMessage()).toEqual("Bob chat message");
+  expect(chatNotifications[1].getChatMessage()?.getMessage()).toEqual("Alice chat message");
 
   // todo: notifications should be verified to contain the chat messages, pending chat notifications implementation
 
