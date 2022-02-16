@@ -1037,17 +1037,16 @@ class HavenoDaemon {
   }
 
   /**
-   * Resolves a dispute.
+   * Resolves a dispute. The winner receives the trade amount and security deposites are returned.
+   * Custom amounts >= 0 will result in the winner receiving the custom amount.
    *
    * @param {string} tradeId - the id of the trade
    * @param {DisputeResult.Winner} winner - the winner of the dispute
    * @param {DisputeResult.Reason} reason - the reason for the dispute
    * @param {string} summaryNotes - summary of the dispute
-   * @param {bigint} buyerPayoutAmount - amount buyer receives
-   * @param {bigint} sellerPayoutAmount - amount seller recieves
+   * @param {bigint} customPayoutAmount - optional custom amount winner receives
    */
-  async resolveDispute(tradeId: string, winner: DisputeResult.Winner, reason: DisputeResult.Reason, summaryNotes: string,
-    buyerPayoutAmount: bigint, sellerPayoutAmount: bigint): Promise<void> {
+  async resolveDispute(tradeId: string, winner: DisputeResult.Winner, reason: DisputeResult.Reason, summaryNotes: string, customPayoutAmount: bigint): Promise<void> {
     let that = this;
     return new Promise(function(resolve, reject) {
       let request = new ResolveDisputeRequest();
@@ -1055,8 +1054,7 @@ class HavenoDaemon {
       request.setWinner(winner);
       request.setReason(reason);
       request.setSummaryNotes(summaryNotes);
-      request.setBuyerPayoutAmount(buyerPayoutAmount.toString());
-      request.setSellerPayoutAmount(sellerPayoutAmount.toString());
+      request.setCustomPayoutAmount(customPayoutAmount.toString());
       that._disputesClient.resolveDispute(request, {password: that._password}, function(err: grpcWeb.RpcError) {
         if (err) reject(err);
         else resolve();
